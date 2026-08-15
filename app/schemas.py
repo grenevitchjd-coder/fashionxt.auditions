@@ -70,6 +70,12 @@ class ManualApplicantIn(BaseModel):
     preselect: bool = False
 
 
+class CheckinIn(BaseModel):
+    event_id: int
+    audition_number: int
+    preselect: bool | None = None
+
+
 class CastingStatusUpdate(BaseModel):
     casting_status: CastingStatus
     preselect: bool | None = None

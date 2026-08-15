@@ -1,15 +1,61 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import Applicant, PoolAssignment, ApplicantSource
 from app.schemas import (
-    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate,
+    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
+
+
+@router.get("/checkin-list")
+async def checkin_list(db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight bulk fetch for the check-in station — loaded ONCE when staff
+    open the screen, then filtered entirely client-side (no per-keystroke
+    API calls). Keeps venue wifi out of the critical path for search speed.
+    """
+    result = await db.execute(
+        select(
+            Applicant.id, Applicant.full_name, Applicant.phone, Applicant.email,
+            Applicant.category, Applicant.event_id, Applicant.audition_number,
+        ).order_by(Applicant.full_name)
+    )
+    rows = result.all()
+    return [
+        {
+            "id": r.id, "full_name": r.full_name, "phone": r.phone, "email": r.email,
+            "category": r.category, "event_id": r.event_id, "audition_number": r.audition_number,
+        }
+        for r in rows
+    ]
+
+
+@router.put("/{applicant_id}/checkin")
+async def checkin_applicant(applicant_id: int, payload: CheckinIn, db: AsyncSession = Depends(get_db)):
+    """Assign an audition number for today's event to an already-existing applicant."""
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    applicant.event_id = payload.event_id
+    applicant.audition_number = payload.audition_number
+    if payload.preselect is not None:
+        applicant.preselect = payload.preselect
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="That audition number is already taken for this event")
+
+    await db.refresh(applicant)
+    return applicant
 
 
 @router.get("/{applicant_id}/detail")
