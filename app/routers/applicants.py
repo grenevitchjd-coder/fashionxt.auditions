@@ -1,16 +1,218 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
+from datetime import datetime
+import csv
+import io
+import re
 
 from app.database import get_db
-from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus, Measurement
+from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus, Measurement, AuditionEvent, Category, PhotoSource
 from app.schemas import (
     ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate, PoolGuestIn,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
+
+
+def _csv_bool(val):
+    return bool(val) and val.strip().lower().startswith("yes")
+
+
+def _csv_category(val):
+    if not val:
+        return Category.female
+    v = val.strip().lower()
+    if "female" in v:
+        return Category.female
+    if "male" in v:
+        return Category.male
+    return Category.non_binary
+
+
+def _csv_date(val):
+    """
+    Real form data has dates typed every which way — ordinal suffixes,
+    weekday prefixes, dot separators, day-first order. Handles the common
+    ones; genuinely ambiguous or garbage values (e.g. missing year, or a
+    stray letter) fall through to None rather than guessing wrong.
+    """
+    if not val:
+        return None
+    s = val.strip()
+    s = re.sub(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+)(st|nd|rd|th)\b", r"\1", s, flags=re.IGNORECASE)
+    if re.match(r"^\d{1,2}\.\d{1,2}\.\d{2,4}$", s):
+        s = s.replace(".", "/")
+
+    formats = [
+        "%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%m-%d-%Y", "%m-%d-%y", "%m.%d.%Y",
+        "%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y", "%b.%d.%Y", "%B.%d.%Y",
+        "%d %B %Y", "%d %b %Y", "%B %Y",
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    try:
+        return datetime.strptime(s, "%d/%m/%Y").date()
+    except ValueError:
+        pass
+    return None
+
+
+def _csv_get(row_values: list, index_map: dict, *candidates: str):
+    for c in candidates:
+        idx = index_map.get(c.strip())
+        if idx is not None and idx < len(row_values):
+            val = row_values[idx]
+            return val.strip() if val else None
+    return None
+
+
+def _find_all_indices(header_row: list, name: str):
+    return [idx for idx, h in enumerate(header_row) if (h or "").strip() == name]
+
+
+def _csv_email(row_values: list, email_indices: list):
+    """
+    This form has two 'Email Address' columns — Google's own auto-captured
+    account email, and a separate question asking the person to type it in.
+    Prefers the typed-in one (more likely to be the address they actually
+    check), but falls back to Google's captured email if that field was
+    left blank, so a blank typed-email cell doesn't drop a real applicant.
+    """
+    for idx in reversed(email_indices):
+        if idx < len(row_values):
+            val = row_values[idx].strip() if row_values[idx] else ""
+            if val:
+                return val
+    return None
+
+
+def _build_index_map(header_row: list):
+    """Maps each stripped header name to its FIRST column index — the CSV export
+    has genuine duplicate headers (Google's own captured email vs. a form question
+    also asking for email), so 'first occurrence wins' resolves it predictably."""
+    index_map = {}
+    for idx, name in enumerate(header_row):
+        key = (name or "").strip()
+        if key not in index_map:
+            index_map[key] = idx
+    return index_map
+
+
+@router.post("/import-csv")
+async def import_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    """
+    Bulk-import applicants from a CSV export of the application Google Form.
+    Upserts by email — same semantics as the live webhook — and skips any
+    blank/padding rows (a Google Sheets export quirk). Re-runnable safely.
+    """
+    raw = await file.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.reader(io.StringIO(text))
+
+    try:
+        header_row = next(reader)
+    except StopIteration:
+        raise HTTPException(status_code=400, detail="CSV appears to be empty")
+
+    index_map = _build_index_map(header_row)
+    email_indices = _find_all_indices(header_row, "Email Address")
+
+    added = 0
+    updated = 0
+    skipped = 0
+    errors = []
+    imported_emails = []
+
+    for i, row_values in enumerate(reader, start=2):
+        email = _csv_email(row_values, email_indices)
+        full_name = _csv_get(row_values, index_map, "Model's Full Name")
+        if not email or not full_name:
+            skipped += 1
+            continue
+
+        try:
+            guardian = _csv_get(
+                row_values, index_map,
+                "Must be Filled up by Parent or Legal Guardian: Write your Full Name and relationship with the model if model's age is under 18. \nIt will be Considered as the Signature of the Parent or Legal Guardian.",
+            )
+            data = {
+                "email": email,
+                "full_name": full_name,
+                "phone": _csv_get(row_values, index_map, "Mobile Phone Number"),
+                "address_street": _csv_get(row_values, index_map, "Address (Street)"),
+                "address_city": _csv_get(row_values, index_map, "Address (City)"),
+                "address_state": _csv_get(row_values, index_map, "Address (State, Zip Country)"),
+                "agency_name": _csv_get(row_values, index_map, "Agency Name (if currently signed. Write N/A if not signed)"),
+                "agency_address": _csv_get(row_values, index_map, "Agency Address (Street, City, State, Zip, Country)"),
+                "category": _csv_category(_csv_get(row_values, index_map, "Auditioning to Model As")),
+                "height_no_shoes": _csv_get(row_values, index_map, "Height without shoes"),
+                "dress_size": _csv_get(row_values, index_map, "Dress Size (Modeling as a Female)"),
+                "jacket_size": _csv_get(row_values, index_map, "Jacket Size (Modeling as a Male)"),
+                "sample_size_spec": _csv_get(row_values, index_map, "Based on Industry Spec, are you .."),
+                "willing_without_lodging": _csv_bool(_csv_get(row_values, index_map, "Willing to Participate even if FashioNXT can't Offer Lodging in Portland")),
+                "available_show_days": _csv_get(row_values, index_map, "Available for FashioNXT Week Oct 8,9, 10, 2026"),
+                "available_editorial": _csv_bool(_csv_get(row_values, index_map, "Available for Editorial or Look-book shoot for FashioNXT other times of the year if schedule permits? The rates will be the same as FashioNXT Week day rate")),
+                "instagram_handle": _csv_get(row_values, index_map, "Instagram Handle and Number of followers"),
+                "facebook_handle": _csv_get(row_values, index_map, "Facebook Handle and  Number of followers"),
+                "tiktok_handle": _csv_get(row_values, index_map, "TikTok Handle and Number of followers"),
+                "notable_achievements": _csv_get(row_values, index_map, "Mention any of your Significant Media Placements, or Highlight Achievements"),
+                "interested_editorial": _csv_bool(_csv_get(row_values, index_map, "Available for Editorial or Look-book shoot for FashioNXT other times of the year if schedule permits? The rates will be the same as FashioNXT Week day rate")),
+                "interested_promo_partner": _csv_bool(_csv_get(row_values, index_map, "Would you like to be a promotional partner of FashioNXT?")),
+                "interested_content_services": _csv_bool(_csv_get(row_values, index_map, "Would you like to purchase Content services from FashioNXT")),
+                "interested_workshops": _csv_bool(_csv_get(row_values, index_map, "Would you like to learn about any workshop or development sessions FashioNXT organizes for models' development?")),
+                "consent_given": _csv_get(row_values, index_map, "CONSENT") == "I CONSENT",
+                "talent_release_signed": _csv_get(row_values, index_map, "TALENT RELEASE FORM") == "I Consent",
+                "signature_name": _csv_get(row_values, index_map, "Writing Your Full Name Below Will be Considered as Your Signature Consenting to the Model Release Form Above"),
+                "signature_date": _csv_date(_csv_get(row_values, index_map, "Date")),
+                "is_minor": bool(guardian),
+                "guardian_name": guardian,
+            }
+
+            result = await db.execute(select(Applicant).where(Applicant.email == email))
+            applicant = result.scalar_one_or_none()
+
+            if applicant is None:
+                applicant = Applicant(**data, source=ApplicantSource.form)
+                db.add(applicant)
+                await db.flush()
+                added += 1
+            else:
+                for key, value in data.items():
+                    setattr(applicant, key, value)
+                await db.execute(Photo.__table__.delete().where(Photo.applicant_id == applicant.id))
+                updated += 1
+
+            for photo_col in [
+                "Modeling Image Upload 1 (Gives FashioNXT Usage Rights)",
+                "Modeling Image Upload 2 (Gives FashioNXT Usage Rights)",
+                "Modeling Image Upload 3 (Gives FashioNXT Usage Rights)",
+            ]:
+                url = _csv_get(row_values, index_map, photo_col)
+                if url:
+                    db.add(Photo(applicant_id=applicant.id, url=url, source=PhotoSource.application))
+
+            imported_emails.append({"email": email, "full_name": full_name})
+
+        except Exception as e:
+            errors.append(f"Row {i} ({email}): {str(e)}")
+            skipped += 1
+            continue
+
+    await db.commit()
+    return {
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors[:10],
+        "imported": imported_emails,
+    }
 
 
 @router.post("/pool-guest")
@@ -253,6 +455,10 @@ async def checkin_applicant(applicant_id: int, payload: CheckinIn, db: AsyncSess
     applicant = await db.get(Applicant, applicant_id)
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
+
+    event = await db.get(AuditionEvent, payload.event_id)
+    if not event:
+        raise HTTPException(status_code=400, detail=f"Event ID {payload.event_id} doesn't exist yet.")
 
     applicant.event_id = payload.event_id
     applicant.audition_number = payload.audition_number
