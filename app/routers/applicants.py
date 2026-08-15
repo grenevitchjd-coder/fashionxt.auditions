@@ -5,12 +5,85 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus
+from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus, Measurement
 from app.schemas import (
-    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn,
+    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
+
+
+@router.get("/measurements-list")
+async def measurements_list(event_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight bulk fetch for the measurements queue — loaded ONCE per event.
+    Flags who already has a measurement record so the default queue can show
+    only Yes/Maybe applicants still missing one.
+    """
+    result = await db.execute(
+        select(
+            Applicant.id, Applicant.full_name, Applicant.audition_number,
+            Applicant.category, Applicant.casting_status, Applicant.preselect,
+        )
+        .where(Applicant.event_id == event_id, Applicant.audition_number.isnot(None))
+        .order_by(Applicant.audition_number)
+    )
+    applicants = result.all()
+    ids = [a.id for a in applicants]
+
+    measured_ids = set()
+    if ids:
+        m_result = await db.execute(select(Measurement.applicant_id).where(Measurement.applicant_id.in_(ids)))
+        measured_ids = {row[0] for row in m_result.all()}
+
+    return [
+        {
+            "id": a.id,
+            "full_name": a.full_name,
+            "audition_number": a.audition_number,
+            "category": a.category,
+            "casting_status": a.casting_status,
+            "preselect": a.preselect,
+            "has_measurement": a.id in measured_ids,
+        }
+        for a in applicants
+    ]
+
+
+@router.get("/{applicant_id}/measurement")
+async def get_measurement(applicant_id: int, db: AsyncSession = Depends(get_db)):
+    """Fetch existing measurement data to pre-fill the entry form, or empty defaults if none yet."""
+    m = await db.get(Measurement, applicant_id)
+    if not m:
+        return None
+    return {
+        "tattoos": m.tattoos, "piercings": m.piercings, "eye_color": m.eye_color, "hair_color": m.hair_color,
+        "height": m.height, "bust_chest": m.bust_chest, "hip_size": m.hip_size, "waist_size": m.waist_size,
+        "arm_length": m.arm_length, "inseam": m.inseam, "shoe_size": m.shoe_size, "dress_size": m.dress_size,
+        "jacket_size": m.jacket_size, "avail_thursday": m.avail_thursday, "avail_friday": m.avail_friday,
+        "avail_saturday": m.avail_saturday, "swim_ok": m.swim_ok, "lingerie_ok": m.lingerie_ok,
+        "see_through_ok": m.see_through_ok, "notes": m.notes,
+    }
+
+
+@router.put("/{applicant_id}/measurement")
+async def save_measurement(applicant_id: int, payload: MeasurementUpdate, db: AsyncSession = Depends(get_db)):
+    """Create or update this applicant's measurement record (1:1, upsert)."""
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    m = await db.get(Measurement, applicant_id)
+    data = payload.model_dump()
+    if m is None:
+        m = Measurement(applicant_id=applicant_id, **data)
+        db.add(m)
+    else:
+        for key, value in data.items():
+            setattr(m, key, value)
+
+    await db.commit()
+    return {"status": "saved"}
 
 
 @router.get("/photo-station-list")

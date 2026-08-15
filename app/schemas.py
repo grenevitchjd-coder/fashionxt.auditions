@@ -78,6 +78,29 @@ class CheckinIn(BaseModel):
     preselect: bool | None = None
 
 
+class MeasurementUpdate(BaseModel):
+    tattoos: bool | None = None
+    piercings: bool | None = None
+    eye_color: str | None = None
+    hair_color: str | None = None
+    height: str | None = None
+    bust_chest: str | None = None
+    hip_size: str | None = None
+    waist_size: str | None = None
+    arm_length: str | None = None
+    inseam: str | None = None
+    shoe_size: str | None = None
+    dress_size: str | None = None
+    jacket_size: str | None = None
+    avail_thursday: bool = False
+    avail_friday: bool = False
+    avail_saturday: bool = False
+    swim_ok: bool | None = None
+    lingerie_ok: bool | None = None
+    see_through_ok: bool | None = None
+    notes: str | None = None
+
+
 class CastingStatusUpdate(BaseModel):
     casting_status: CastingStatus
     preselect: bool | None = None
