@@ -53,28 +53,45 @@ async def measurements_list(event_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/{applicant_id}/measurement")
 async def get_measurement(applicant_id: int, db: AsyncSession = Depends(get_db)):
     """Fetch existing measurement data to pre-fill the entry form, or empty defaults if none yet."""
-    m = await db.get(Measurement, applicant_id)
-    if not m:
-        return None
-    return {
-        "tattoos": m.tattoos, "piercings": m.piercings, "eye_color": m.eye_color, "hair_color": m.hair_color,
-        "height": m.height, "bust_chest": m.bust_chest, "hip_size": m.hip_size, "waist_size": m.waist_size,
-        "arm_length": m.arm_length, "inseam": m.inseam, "shoe_size": m.shoe_size, "dress_size": m.dress_size,
-        "jacket_size": m.jacket_size, "avail_thursday": m.avail_thursday, "avail_friday": m.avail_friday,
-        "avail_saturday": m.avail_saturday, "swim_ok": m.swim_ok, "lingerie_ok": m.lingerie_ok,
-        "see_through_ok": m.see_through_ok, "notes": m.notes,
-    }
-
-
-@router.put("/{applicant_id}/measurement")
-async def save_measurement(applicant_id: int, payload: MeasurementUpdate, db: AsyncSession = Depends(get_db)):
-    """Create or update this applicant's measurement record (1:1, upsert)."""
     applicant = await db.get(Applicant, applicant_id)
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
 
     m = await db.get(Measurement, applicant_id)
+    data = {
+        "tattoos": None, "piercings": None, "eye_color": None, "hair_color": None,
+        "height": None, "bust_chest": None, "hip_size": None, "waist_size": None,
+        "arm_length": None, "inseam": None, "shoe_size": None, "dress_size": None,
+        "jacket_size": None, "avail_thursday": False, "avail_friday": False,
+        "avail_saturday": False, "swim_ok": None, "lingerie_ok": None,
+        "see_through_ok": None, "notes": None,
+    }
+    if m:
+        data.update({
+            "tattoos": m.tattoos, "piercings": m.piercings, "eye_color": m.eye_color, "hair_color": m.hair_color,
+            "height": m.height, "bust_chest": m.bust_chest, "hip_size": m.hip_size, "waist_size": m.waist_size,
+            "arm_length": m.arm_length, "inseam": m.inseam, "shoe_size": m.shoe_size, "dress_size": m.dress_size,
+            "jacket_size": m.jacket_size, "avail_thursday": m.avail_thursday, "avail_friday": m.avail_friday,
+            "avail_saturday": m.avail_saturday, "swim_ok": m.swim_ok, "lingerie_ok": m.lingerie_ok,
+            "see_through_ok": m.see_through_ok, "notes": m.notes,
+        })
+    data["is_minor"] = applicant.is_minor
+    return data
+
+
+@router.put("/{applicant_id}/measurement")
+async def save_measurement(applicant_id: int, payload: MeasurementUpdate, db: AsyncSession = Depends(get_db)):
+    """Create or update this applicant's measurement record (1:1, upsert). Minor status lives on the applicant itself."""
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
     data = payload.model_dump()
+    is_minor = data.pop("is_minor", None)
+    if is_minor is not None:
+        applicant.is_minor = is_minor
+
+    m = await db.get(Measurement, applicant_id)
     if m is None:
         m = Measurement(applicant_id=applicant_id, **data)
         db.add(m)

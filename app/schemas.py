@@ -99,6 +99,7 @@ class MeasurementUpdate(BaseModel):
     lingerie_ok: bool | None = None
     see_through_ok: bool | None = None
     notes: str | None = None
+    is_minor: bool | None = None
 
 
 class CastingStatusUpdate(BaseModel):
