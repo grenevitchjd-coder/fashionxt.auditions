@@ -7,10 +7,91 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus, Measurement
 from app.schemas import (
-    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate,
+    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate, PoolGuestIn,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
+
+
+@router.post("/pool-guest")
+async def add_pool_guest(payload: PoolGuestIn, db: AsyncSession = Depends(get_db)):
+    """
+    Add a model directly into the pool review stage — no audition event,
+    no audition number, automatically marked Yes. For designer requests,
+    late additions, or anyone brought in after auditions have finished.
+    """
+    applicant = Applicant(
+        full_name=payload.full_name,
+        email=payload.email,
+        phone=payload.phone,
+        category=payload.category,
+        agency_name=payload.agency_name,
+        agency_address=payload.agency_address,
+        source=ApplicantSource.manual,
+        casting_status=CastingStatus.yes,
+        event_id=None,
+        audition_number=None,
+    )
+    db.add(applicant)
+    await db.commit()
+    await db.refresh(applicant)
+    return {"id": applicant.id, "full_name": applicant.full_name}
+
+
+@router.get("/pools-list")
+async def pools_list(db: AsyncSession = Depends(get_db)):
+    """
+    Every Yes/Maybe/preselect applicant across ALL events — pooling happens
+    after both cities finish auditioning, so this isn't scoped to one event.
+    Includes the fields needed for the review grid without per-card fetches.
+    """
+    result = await db.execute(
+        select(Applicant)
+        .where(or_(Applicant.casting_status.in_([CastingStatus.yes, CastingStatus.maybe]), Applicant.preselect == True))
+        .options(
+            selectinload(Applicant.photos),
+            selectinload(Applicant.measurement),
+            selectinload(Applicant.pool_assignment),
+        )
+        .order_by(Applicant.audition_number)
+    )
+    applicants = result.scalars().all()
+
+    def pick_photo(photos):
+        headshot = next((p for p in photos if p.tag == "headshot"), None)
+        chosen = headshot or (photos[0] if photos else None)
+        return chosen.url if chosen else None
+
+    return [
+        {
+            "id": a.id,
+            "full_name": a.full_name,
+            "audition_number": a.audition_number,
+            "category": a.category,
+            "casting_status": a.casting_status,
+            "preselect": a.preselect,
+            "pool": a.pool_assignment.pool if a.pool_assignment else None,
+            "photo_url": pick_photo(a.photos),
+            "has_agency": bool(a.agency_name and a.agency_name.strip().upper() not in ("N/A", "NA", "")),
+            "measurement": (
+                {
+                    "height": a.measurement.height,
+                    "bust_chest": a.measurement.bust_chest,
+                    "waist_size": a.measurement.waist_size,
+                    "hip_size": a.measurement.hip_size,
+                    "dress_size": a.measurement.dress_size,
+                    "jacket_size": a.measurement.jacket_size,
+                    "lingerie_ok": a.measurement.lingerie_ok,
+                    "see_through_ok": a.measurement.see_through_ok,
+                    "avail_thursday": a.measurement.avail_thursday,
+                    "avail_friday": a.measurement.avail_friday,
+                    "avail_saturday": a.measurement.avail_saturday,
+                }
+                if a.measurement else None
+            ),
+        }
+        for a in applicants
+    ]
 
 
 @router.get("/measurements-list")

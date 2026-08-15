@@ -61,6 +61,16 @@ class ApplicantOut(BaseModel):
         from_attributes = True
 
 
+class PoolGuestIn(BaseModel):
+    """Adding a model directly into the pool review stage — skips audition day entirely."""
+    full_name: str
+    email: EmailStr
+    phone: str | None = None
+    category: Category
+    agency_name: str | None = None
+    agency_address: str | None = None
+
+
 class ManualApplicantIn(BaseModel):
     """For adding a guest / walk-in model directly."""
     full_name: str
