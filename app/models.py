@@ -181,6 +181,48 @@ class PoolAssignment(Base):
     applicant: Mapped["Applicant"] = relationship(back_populates="pool_assignment")
 
 
+class ShowDay(Base):
+    """The actual FashioNXT Week runway days (Thu/Fri/Sat) — distinct from
+    audition_event, which tracks the Portland/Seattle audition days."""
+    __tablename__ = "show_day"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    show_date: Mapped[date | None] = mapped_column(Date)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    designers: Mapped[list["Designer"]] = relationship(back_populates="show_day", cascade="all, delete-orphan")
+
+
+class Designer(Base):
+    __tablename__ = "designer"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    show_day_id: Mapped[int] = mapped_column(ForeignKey("show_day.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    order_in_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    show_day: Mapped["ShowDay"] = relationship(back_populates="designers")
+    assignments: Mapped[list["DesignerAssignment"]] = relationship(back_populates="designer", cascade="all, delete-orphan")
+
+
+class DesignerAssignment(Base):
+    """Which model is walking for which designer — many-to-many by design,
+    since reusing the same model across multiple designers in one day is the goal."""
+    __tablename__ = "designer_assignment"
+    __table_args__ = (UniqueConstraint("designer_id", "applicant_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
+    applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    designer: Mapped["Designer"] = relationship(back_populates="assignments")
+    applicant: Mapped["Applicant"] = relationship()
+
+
 class Deck(Base):
     __tablename__ = "deck"
 

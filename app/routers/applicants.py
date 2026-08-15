@@ -493,7 +493,7 @@ async def save_measurement(applicant_id: int, payload: MeasurementUpdate, db: As
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
 
-    data = payload.model_dump()
+    data = payload.model_dump(exclude_unset=True)
     is_minor = data.pop("is_minor", None)
     if is_minor is not None:
         applicant.is_minor = is_minor

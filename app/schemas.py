@@ -87,6 +87,16 @@ class CheckinIn(BaseModel):
     preselect: bool | None = None
 
 
+class DesignerIn(BaseModel):
+    show_day_id: int
+    name: str
+    notes: str | None = None
+
+
+class DesignerAssignmentIn(BaseModel):
+    applicant_id: int
+
+
 class ContactInfoUpdate(BaseModel):
     category: Category | None = None
     email: str | None = None
