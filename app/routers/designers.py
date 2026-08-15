@@ -68,6 +68,30 @@ async def add_designer(payload: DesignerIn, db: AsyncSession = Depends(get_db)):
     return {"id": designer.id, "name": designer.name, "order_in_day": designer.order_in_day}
 
 
+@router.put("/designers/{designer_id}/move")
+async def move_designer(designer_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Moves a designer to a different show day, appending them to the end of that day's lineup."""
+    designer = await db.get(Designer, designer_id)
+    if not designer:
+        raise HTTPException(status_code=404, detail="Designer not found")
+
+    new_show_day_id = payload.get("show_day_id")
+    if not new_show_day_id:
+        raise HTTPException(status_code=400, detail="show_day_id is required")
+
+    result = await db.execute(
+        select(func.max(Designer.order_in_day)).where(Designer.show_day_id == new_show_day_id)
+    )
+    next_order = (result.scalar() or 0) + 1
+
+    designer.show_day_id = new_show_day_id
+    designer.order_in_day = next_order
+
+    await db.commit()
+    await db.refresh(designer)
+    return {"id": designer.id, "show_day_id": designer.show_day_id, "order_in_day": designer.order_in_day}
+
+
 @router.delete("/designers/{designer_id}")
 async def remove_designer(designer_id: int, db: AsyncSession = Depends(get_db)):
     designer = await db.get(Designer, designer_id)
