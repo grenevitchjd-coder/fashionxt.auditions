@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import ingest, applicants, decks
+from app.routers import ingest, applicants, decks, events
 
 app = FastAPI(title="FashioNXT Casting API")
 
@@ -15,6 +15,7 @@ app.add_middleware(
 app.include_router(ingest.router)
 app.include_router(applicants.router)
 app.include_router(decks.router)
+app.include_router(events.router)
 
 
 @app.get("/health")
