@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from datetime import datetime
@@ -310,6 +310,11 @@ async def checkin_applicant(applicant_id: int, payload: CheckinIn, db: AsyncSess
     event = await db.get(AuditionEvent, payload.event_id)
     if not event:
         raise HTTPException(status_code=400, detail=f"Event ID {payload.event_id} doesn't exist yet.")
+
+    # Serializes concurrent check-ins for THIS event only (Portland and Seattle
+    # don't block each other) — a simultaneous tap from two staff members just
+    # queues briefly instead of ever risking a duplicate number or an error.
+    await db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": payload.event_id})
 
     result = await db.execute(
         select(func.max(Applicant.audition_number)).where(Applicant.event_id == payload.event_id)
