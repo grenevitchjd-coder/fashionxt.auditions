@@ -1,16 +1,55 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.models import Applicant, PoolAssignment, ApplicantSource
+from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus
 from app.schemas import (
     ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
+
+
+@router.get("/photo-station-list")
+async def photo_station_list(event_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight bulk fetch for the photo station — loaded ONCE per event.
+    Returns each person's captured photo tags (not just a count) so the
+    frontend can tell exactly which required shots are still missing.
+    """
+    result = await db.execute(
+        select(
+            Applicant.id, Applicant.full_name, Applicant.audition_number,
+            Applicant.category, Applicant.casting_status, Applicant.preselect,
+        )
+        .where(Applicant.event_id == event_id, Applicant.audition_number.isnot(None))
+        .order_by(Applicant.audition_number)
+    )
+    applicants = result.all()
+    ids = [a.id for a in applicants]
+
+    tags_by_applicant = {}
+    if ids:
+        photo_result = await db.execute(select(Photo.applicant_id, Photo.tag).where(Photo.applicant_id.in_(ids)))
+        for pid, tag in photo_result.all():
+            tags_by_applicant.setdefault(pid, []).append(tag)
+
+    return [
+        {
+            "id": a.id,
+            "full_name": a.full_name,
+            "audition_number": a.audition_number,
+            "category": a.category,
+            "casting_status": a.casting_status,
+            "preselect": a.preselect,
+            "tags": tags_by_applicant.get(a.id, []),
+            "photo_count": len(tags_by_applicant.get(a.id, [])),
+        }
+        for a in applicants
+    ]
 
 
 @router.get("/checkin-list")
@@ -149,9 +188,16 @@ async def update_casting_status(
     applicant = await db.get(Applicant, applicant_id)
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
-    applicant.casting_status = payload.casting_status
+
     if payload.preselect is not None:
         applicant.preselect = payload.preselect
+
+    if payload.preselect:
+        # Preselects skip judging entirely — automatically approved for the show.
+        applicant.casting_status = CastingStatus.yes
+    else:
+        applicant.casting_status = payload.casting_status
+
     await db.commit()
     await db.refresh(applicant)
     return applicant
