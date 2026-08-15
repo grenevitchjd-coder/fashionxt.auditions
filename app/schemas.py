@@ -54,6 +54,8 @@ class ApplicantOut(BaseModel):
     preselect: bool
     source: ApplicantSource
     updated_at: datetime
+    height_no_shoes: str | None = None
+    available_show_days: str | None = None
 
     class Config:
         from_attributes = True
