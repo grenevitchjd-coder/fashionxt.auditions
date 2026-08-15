@@ -194,6 +194,7 @@ async def final_roster(show_day_id: int, db: AsyncSession = Depends(get_db)):
             "photo_url": pick_photo(a.photos),
             "agency_name": a.agency_name,
             "has_agency": bool(a.agency_name and a.agency_name.strip().upper() not in ("N/A", "NA", "")),
+            "is_minor": a.is_minor,
             "assignments": assignment_map.get(a.id, []),
             "measurement": (
                 {
