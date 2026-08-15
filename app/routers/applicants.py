@@ -215,6 +215,62 @@ async def import_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     }
 
 
+@router.post("/{applicant_id}/reset")
+async def reset_applicant(applicant_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Testing helper — clears this applicant's check-in, casting decision,
+    preselect, pool assignment, measurements, and photos. Keeps their base
+    contact/agency record intact (name, email, phone, agency, address).
+    """
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    applicant.event_id = None
+    applicant.audition_number = None
+    applicant.casting_status = CastingStatus.pending
+    applicant.preselect = False
+
+    existing_pool = await db.get(PoolAssignment, applicant_id)
+    if existing_pool:
+        await db.delete(existing_pool)
+
+    existing_measurement = await db.get(Measurement, applicant_id)
+    if existing_measurement:
+        await db.delete(existing_measurement)
+
+    await db.execute(Photo.__table__.delete().where(Photo.applicant_id == applicant_id))
+
+    await db.commit()
+    await db.refresh(applicant)
+    return applicant
+
+
+@router.post("/reset-all")
+async def reset_all_applicants(db: AsyncSession = Depends(get_db)):
+    """
+    System-wide testing reset — clears check-ins, casting decisions, preselect
+    flags, pool assignments, measurements, and photos for EVERY applicant.
+    Keeps base applicant records (name, email, agency, address) and audition
+    events (Portland/Seattle) intact — no re-import needed after this.
+    """
+    result = await db.execute(select(Applicant))
+    applicants = result.scalars().all()
+
+    for a in applicants:
+        a.event_id = None
+        a.audition_number = None
+        a.casting_status = CastingStatus.pending
+        a.preselect = False
+
+    await db.execute(PoolAssignment.__table__.delete())
+    await db.execute(Measurement.__table__.delete())
+    await db.execute(Photo.__table__.delete())
+
+    await db.commit()
+    return {"reset_count": len(applicants)}
+
+
 @router.get("/directory")
 async def applicants_directory(db: AsyncSession = Depends(get_db)):
     """
