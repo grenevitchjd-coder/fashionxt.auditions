@@ -291,6 +291,7 @@ async def applicants_directory(db: AsyncSession = Depends(get_db)):
             "has_agency": bool(a.agency_name and a.agency_name.strip().upper() not in ("N/A", "NA", "")),
             "casting_status": a.casting_status,
             "audition_number": a.audition_number,
+            "preselect": a.preselect,
         }
         for a in applicants
     ]
