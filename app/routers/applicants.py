@@ -17,8 +17,8 @@ router = APIRouter(prefix="/applicants", tags=["applicants"])
 async def photo_station_list(event_id: int, db: AsyncSession = Depends(get_db)):
     """
     Lightweight bulk fetch for the photo station — loaded ONCE per event.
-    Returns each person's captured photo tags (not just a count) so the
-    frontend can tell exactly which required shots are still missing.
+    Includes each person's actual photo records (not just tags) so the whole
+    queue can render fully-inline capture buttons with zero per-row fetches.
     """
     result = await db.execute(
         select(
@@ -31,11 +31,13 @@ async def photo_station_list(event_id: int, db: AsyncSession = Depends(get_db)):
     applicants = result.all()
     ids = [a.id for a in applicants]
 
-    tags_by_applicant = {}
+    photos_by_applicant = {}
     if ids:
-        photo_result = await db.execute(select(Photo.applicant_id, Photo.tag).where(Photo.applicant_id.in_(ids)))
-        for pid, tag in photo_result.all():
-            tags_by_applicant.setdefault(pid, []).append(tag)
+        photo_result = await db.execute(
+            select(Photo.id, Photo.applicant_id, Photo.url, Photo.tag).where(Photo.applicant_id.in_(ids))
+        )
+        for pid, aid, url, tag in photo_result.all():
+            photos_by_applicant.setdefault(aid, []).append({"id": pid, "url": url, "tag": tag})
 
     return [
         {
@@ -45,8 +47,7 @@ async def photo_station_list(event_id: int, db: AsyncSession = Depends(get_db)):
             "category": a.category,
             "casting_status": a.casting_status,
             "preselect": a.preselect,
-            "tags": tags_by_applicant.get(a.id, []),
-            "photo_count": len(tags_by_applicant.get(a.id, [])),
+            "photos": photos_by_applicant.get(a.id, []),
         }
         for a in applicants
     ]
