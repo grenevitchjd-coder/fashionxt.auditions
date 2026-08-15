@@ -88,6 +88,17 @@ class CheckinIn(BaseModel):
     preselect: bool | None = None
 
 
+class ContactInfoUpdate(BaseModel):
+    category: Category | None = None
+    email: str | None = None
+    phone: str | None = None
+    agency_name: str | None = None
+    agency_address: str | None = None
+    address_street: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+
+
 class MeasurementUpdate(BaseModel):
     tattoos: bool | None = None
     piercings: bool | None = None

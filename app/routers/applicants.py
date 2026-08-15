@@ -11,7 +11,7 @@ import re
 from app.database import get_db
 from app.models import Applicant, PoolAssignment, ApplicantSource, Photo, CastingStatus, Measurement, AuditionEvent, Category, PhotoSource
 from app.schemas import (
-    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate, PoolGuestIn,
+    ApplicantOut, ManualApplicantIn, CastingStatusUpdate, PoolAssignmentUpdate, CheckinIn, MeasurementUpdate, PoolGuestIn, ContactInfoUpdate,
 )
 
 router = APIRouter(prefix="/applicants", tags=["applicants"])
@@ -213,6 +213,47 @@ async def import_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         "errors": errors[:10],
         "imported": imported_emails,
     }
+
+
+@router.get("/directory")
+async def applicants_directory(db: AsyncSession = Depends(get_db)):
+    """
+    Lightweight bulk fetch for the Roster search/confirm directory — every
+    applicant regardless of event, loaded once for instant client-side search.
+    """
+    result = await db.execute(
+        select(Applicant).order_by(Applicant.full_name)
+    )
+    applicants = result.scalars().all()
+    return [
+        {
+            "id": a.id,
+            "full_name": a.full_name,
+            "email": a.email,
+            "phone": a.phone,
+            "category": a.category,
+            "has_agency": bool(a.agency_name and a.agency_name.strip().upper() not in ("N/A", "NA", "")),
+            "casting_status": a.casting_status,
+            "audition_number": a.audition_number,
+        }
+        for a in applicants
+    ]
+
+
+@router.put("/{applicant_id}/contact-info")
+async def update_contact_info(applicant_id: int, payload: ContactInfoUpdate, db: AsyncSession = Depends(get_db)):
+    """Save edits from the Roster confirm screen — category, contact details, agency, address."""
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(applicant, key, value)
+
+    await db.commit()
+    await db.refresh(applicant)
+    return applicant
 
 
 @router.post("/pool-guest")
@@ -502,6 +543,8 @@ async def get_applicant_detail(applicant_id: int, db: AsyncSession = Depends(get
         "preselect": applicant.preselect,
         "source": applicant.source,
         "agency_name": applicant.agency_name,
+        "agency_address": applicant.agency_address,
+        "address_street": applicant.address_street,
         "address_city": applicant.address_city,
         "address_state": applicant.address_state,
         "willing_without_lodging": applicant.willing_without_lodging,
