@@ -24,7 +24,7 @@ async def list_show_days(db: AsyncSession = Depends(get_db)):
 
 @router.get("/designers")
 async def list_designers(show_day_id: int, db: AsyncSession = Depends(get_db)):
-    """Every designer for a show day, in lineup order, with their currently assigned models."""
+    """Every designer for a show day, in lineup order, with their currently assigned models (in walk order)."""
     result = await db.execute(
         select(Designer)
         .where(Designer.show_day_id == show_day_id)
@@ -43,6 +43,7 @@ async def list_designers(show_day_id: int, db: AsyncSession = Depends(get_db)):
                     "applicant_id": a.applicant.id,
                     "full_name": a.applicant.full_name,
                     "category": a.applicant.category,
+                    "order_in_lineup": a.order_in_lineup,
                 }
                 for a in d.assignments
             ],
@@ -123,13 +124,36 @@ async def add_assignment(designer_id: int, payload: DesignerAssignmentIn, db: As
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
 
-    assignment = DesignerAssignment(designer_id=designer_id, applicant_id=payload.applicant_id)
+    result = await db.execute(
+        select(func.max(DesignerAssignment.order_in_lineup)).where(DesignerAssignment.designer_id == designer_id)
+    )
+    next_order = (result.scalar() or 0) + 1
+
+    assignment = DesignerAssignment(designer_id=designer_id, applicant_id=payload.applicant_id, order_in_lineup=next_order)
     db.add(assignment)
     try:
         await db.commit()
     except IntegrityError:
         await db.rollback()  # already assigned — treat as a no-op, not an error
     return {"status": "assigned"}
+
+
+@router.put("/designers/{designer_id}/assignments/reorder")
+async def reorder_assignments(designer_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Body: {"ordered_applicant_ids": [id1, id2, ...]} — resequences walk order within this designer's lineup."""
+    ordered_ids = payload.get("ordered_applicant_ids", [])
+    for position, applicant_id in enumerate(ordered_ids, start=1):
+        result = await db.execute(
+            select(DesignerAssignment).where(
+                DesignerAssignment.designer_id == designer_id,
+                DesignerAssignment.applicant_id == applicant_id,
+            )
+        )
+        assignment = result.scalar_one_or_none()
+        if assignment:
+            assignment.order_in_lineup = position
+    await db.commit()
+    return {"status": "reordered"}
 
 
 @router.delete("/designers/{designer_id}/assignments/{applicant_id}")

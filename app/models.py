@@ -205,18 +205,22 @@ class Designer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     show_day: Mapped["ShowDay"] = relationship(back_populates="designers")
-    assignments: Mapped[list["DesignerAssignment"]] = relationship(back_populates="designer", cascade="all, delete-orphan")
+    assignments: Mapped[list["DesignerAssignment"]] = relationship(
+        back_populates="designer", cascade="all, delete-orphan", order_by="DesignerAssignment.order_in_lineup"
+    )
 
 
 class DesignerAssignment(Base):
     """Which model is walking for which designer — many-to-many by design,
-    since reusing the same model across multiple designers in one day is the goal."""
+    since reusing the same model across multiple designers in one day is the goal.
+    order_in_lineup tracks walk order within THIS designer's segment specifically."""
     __tablename__ = "designer_assignment"
     __table_args__ = (UniqueConstraint("designer_id", "applicant_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
     applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
+    order_in_lineup: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     designer: Mapped["Designer"] = relationship(back_populates="assignments")
