@@ -84,7 +84,6 @@ class ManualApplicantIn(BaseModel):
 
 class CheckinIn(BaseModel):
     event_id: int
-    audition_number: int
     preselect: bool | None = None
 
 

@@ -296,18 +296,40 @@ async def applicants_directory(db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.put("/{applicant_id}/contact-info")
-async def update_contact_info(applicant_id: int, payload: ContactInfoUpdate, db: AsyncSession = Depends(get_db)):
-    """Save edits from the Roster confirm screen — category, contact details, agency, address."""
+@router.put("/{applicant_id}/checkin")
+async def checkin_applicant(applicant_id: int, payload: CheckinIn, db: AsyncSession = Depends(get_db)):
+    """
+    Check an applicant into today's event — audition number is auto-assigned
+    as the next sequential number for this event (no manual entry needed).
+    Preselecting here auto-approves them for the show, same as elsewhere.
+    """
     applicant = await db.get(Applicant, applicant_id)
     if not applicant:
         raise HTTPException(status_code=404, detail="Applicant not found")
 
-    data = payload.model_dump(exclude_unset=True)
-    for key, value in data.items():
-        setattr(applicant, key, value)
+    event = await db.get(AuditionEvent, payload.event_id)
+    if not event:
+        raise HTTPException(status_code=400, detail=f"Event ID {payload.event_id} doesn't exist yet.")
 
-    await db.commit()
+    result = await db.execute(
+        select(func.max(Applicant.audition_number)).where(Applicant.event_id == payload.event_id)
+    )
+    next_number = (result.scalar() or 0) + 1
+
+    applicant.event_id = payload.event_id
+    applicant.audition_number = next_number
+    if payload.preselect is not None:
+        applicant.preselect = payload.preselect
+    if payload.preselect:
+        # Preselects skip judging entirely — automatically approved for the show.
+        applicant.casting_status = CastingStatus.yes
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Number assignment conflict — try again")
+
     await db.refresh(applicant)
     return applicant
 
@@ -533,7 +555,7 @@ async def checkin_list(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(
             Applicant.id, Applicant.full_name, Applicant.phone, Applicant.email,
-            Applicant.category, Applicant.event_id, Applicant.audition_number,
+            Applicant.category, Applicant.event_id, Applicant.audition_number, Applicant.preselect,
         ).order_by(Applicant.full_name)
     )
     rows = result.all()
@@ -541,6 +563,7 @@ async def checkin_list(db: AsyncSession = Depends(get_db)):
         {
             "id": r.id, "full_name": r.full_name, "phone": r.phone, "email": r.email,
             "category": r.category, "event_id": r.event_id, "audition_number": r.audition_number,
+            "preselect": r.preselect,
         }
         for r in rows
     ]
