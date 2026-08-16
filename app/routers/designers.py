@@ -3,10 +3,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
+import secrets
 
 from app.database import get_db
 from app.models import ShowDay, Designer, DesignerAssignment, Applicant
-from app.schemas import DesignerIn, DesignerAssignmentIn
+from app.schemas import DesignerIn, DesignerAssignmentIn, DeckPreferenceIn
 
 router = APIRouter(tags=["designers"])
 
@@ -44,9 +45,11 @@ async def list_designers(show_day_id: int, db: AsyncSession = Depends(get_db)):
                     "full_name": a.applicant.full_name,
                     "category": a.applicant.category,
                     "order_in_lineup": a.order_in_lineup,
+                    "preference": a.preference,
                 }
                 for a in d.assignments
             ],
+            "share_token": d.share_token,
         }
         for d in designers
     ]
@@ -61,12 +64,13 @@ async def add_designer(payload: DesignerIn, db: AsyncSession = Depends(get_db)):
     next_order = (result.scalar() or 0) + 1
 
     designer = Designer(
-        show_day_id=payload.show_day_id, name=payload.name, notes=payload.notes, order_in_day=next_order
+        show_day_id=payload.show_day_id, name=payload.name, notes=payload.notes, order_in_day=next_order,
+        share_token=secrets.token_urlsafe(16),
     )
     db.add(designer)
     await db.commit()
     await db.refresh(designer)
-    return {"id": designer.id, "name": designer.name, "order_in_day": designer.order_in_day}
+    return {"id": designer.id, "name": designer.name, "order_in_day": designer.order_in_day, "share_token": designer.share_token}
 
 
 @router.put("/designers/{designer_id}/move")
@@ -169,6 +173,95 @@ async def remove_assignment(designer_id: int, applicant_id: int, db: AsyncSessio
         await db.delete(assignment)
         await db.commit()
     return {"status": "removed"}
+
+
+@router.get("/deck/{token}")
+async def get_deck(token: str, db: AsyncSession = Depends(get_db)):
+    """
+    Public, unauthenticated view for a designer — accessible only with their
+    unique share token. Shows exactly their assigned models with garment-fitting
+    info and photos. Deliberately excludes agency info and the lingerie/swim/
+    see-through fields, and never reveals which OTHER designers a model also walks for.
+    """
+    result = await db.execute(
+        select(Designer).where(Designer.share_token == token).options(selectinload(Designer.show_day))
+    )
+    designer = result.scalar_one_or_none()
+    if not designer:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    result = await db.execute(
+        select(DesignerAssignment)
+        .where(DesignerAssignment.designer_id == designer.id)
+        .options(
+            selectinload(DesignerAssignment.applicant).selectinload(Applicant.measurement),
+            selectinload(DesignerAssignment.applicant).selectinload(Applicant.photos),
+        )
+        .order_by(DesignerAssignment.order_in_lineup)
+    )
+    assignments = result.scalars().all()
+
+    def photo_groups(photos):
+        main_tags = ["headshot", "full_frontal", "left_side", "right_side"]
+        main = [p for p in photos if p.tag in main_tags]
+        main.sort(key=lambda p: main_tags.index(p.tag))
+        extra = [p for p in photos if p.tag not in main_tags]
+        return (
+            [{"tag": p.tag, "url": p.url} for p in main],
+            [{"tag": p.tag, "url": p.url} for p in extra],
+        )
+
+    models = []
+    for a in assignments:
+        applicant = a.applicant
+        m = applicant.measurement
+        main_photos, extra_photos = photo_groups(applicant.photos)
+        models.append({
+            "applicant_id": applicant.id,
+            "full_name": applicant.full_name,
+            "category": applicant.category,
+            "is_minor": applicant.is_minor,
+            "preference": a.preference,
+            "measurement": (
+                {
+                    "height": m.height, "bust_chest": m.bust_chest, "waist_size": m.waist_size,
+                    "hip_size": m.hip_size, "shoe_size": m.shoe_size, "dress_size": m.dress_size,
+                    "jacket_size": m.jacket_size, "tattoos": m.tattoos, "piercings": m.piercings,
+                }
+                if m else None
+            ),
+            "main_photos": main_photos,
+            "extra_photos": extra_photos,
+        })
+
+    return {
+        "designer_name": designer.name,
+        "show_day": designer.show_day.name if designer.show_day else None,
+        "models": models,
+    }
+
+
+@router.put("/deck/{token}/models/{applicant_id}/preference")
+async def set_deck_preference(token: str, applicant_id: int, payload: DeckPreferenceIn, db: AsyncSession = Depends(get_db)):
+    """Public — lets a designer mark Preferred 1 / Preferred 2 (or clear it) via their own link."""
+    result = await db.execute(select(Designer).where(Designer.share_token == token))
+    designer = result.scalar_one_or_none()
+    if not designer:
+        raise HTTPException(status_code=404, detail="Deck not found")
+
+    result = await db.execute(
+        select(DesignerAssignment).where(
+            DesignerAssignment.designer_id == designer.id,
+            DesignerAssignment.applicant_id == applicant_id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="This model isn't on your deck")
+
+    assignment.preference = payload.preference
+    await db.commit()
+    return {"status": "saved"}
 
 
 @router.get("/final-roster")

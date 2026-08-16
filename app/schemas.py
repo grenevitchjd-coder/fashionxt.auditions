@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from pydantic import BaseModel, EmailStr
-from app.models import Category, CastingStatus, Pool, ApplicantSource, DesignerResponse
+from app.models import Category, CastingStatus, Pool, ApplicantSource
 
 
 class ApplicationFormPayload(BaseModel):
@@ -97,6 +97,10 @@ class DesignerAssignmentIn(BaseModel):
     applicant_id: int
 
 
+class DeckPreferenceIn(BaseModel):
+    preference: str | None = None  # "one" / "two" / None
+
+
 class ContactInfoUpdate(BaseModel):
     category: Category | None = None
     email: str | None = None
@@ -139,8 +143,3 @@ class CastingStatusUpdate(BaseModel):
 
 class PoolAssignmentUpdate(BaseModel):
     pool: Pool | None  # null = remove from any pool
-
-
-class DesignerResponseUpdate(BaseModel):
-    applicant_id: int
-    designer_response: DesignerResponse | None

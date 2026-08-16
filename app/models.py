@@ -202,6 +202,7 @@ class Designer(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     order_in_day: Mapped[int] = mapped_column(Integer, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
+    share_token: Mapped[str | None] = mapped_column(Text, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     show_day: Mapped["ShowDay"] = relationship(back_populates="designers")
@@ -213,7 +214,8 @@ class Designer(Base):
 class DesignerAssignment(Base):
     """Which model is walking for which designer — many-to-many by design,
     since reusing the same model across multiple designers in one day is the goal.
-    order_in_lineup tracks walk order within THIS designer's segment specifically."""
+    order_in_lineup tracks walk order within THIS designer's segment specifically.
+    preference holds the designer's own pick ("one" / "two" / None) from their deck link."""
     __tablename__ = "designer_assignment"
     __table_args__ = (UniqueConstraint("designer_id", "applicant_id"),)
 
@@ -221,11 +223,11 @@ class DesignerAssignment(Base):
     designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
     applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
     order_in_lineup: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    preference: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     designer: Mapped["Designer"] = relationship(back_populates="assignments")
     applicant: Mapped["Applicant"] = relationship()
-
 
 class Deck(Base):
     __tablename__ = "deck"
