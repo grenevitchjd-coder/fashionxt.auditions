@@ -297,6 +297,22 @@ async def applicants_directory(db: AsyncSession = Depends(get_db)):
     ]
 
 
+@router.put("/{applicant_id}/contact-info")
+async def update_contact_info(applicant_id: int, payload: ContactInfoUpdate, db: AsyncSession = Depends(get_db)):
+    """Save edits from the Roster confirm screen — category, contact details, agency, address."""
+    applicant = await db.get(Applicant, applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(applicant, key, value)
+
+    await db.commit()
+    await db.refresh(applicant)
+    return applicant
+
+
 @router.put("/{applicant_id}/checkin")
 async def checkin_applicant(applicant_id: int, payload: CheckinIn, db: AsyncSession = Depends(get_db)):
     """
