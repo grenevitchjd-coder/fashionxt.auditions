@@ -203,6 +203,7 @@ class Designer(Base):
     order_in_day: Mapped[int] = mapped_column(Integer, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     share_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    roster_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     show_day: Mapped["ShowDay"] = relationship(back_populates="designers")
@@ -228,6 +229,7 @@ class DesignerAssignment(Base):
 
     designer: Mapped["Designer"] = relationship(back_populates="assignments")
     applicant: Mapped["Applicant"] = relationship()
+
 
 class Deck(Base):
     __tablename__ = "deck"

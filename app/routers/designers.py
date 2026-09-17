@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 import secrets
 
 from app.database import get_db
-from app.models import ShowDay, Designer, DesignerAssignment, Applicant
+from app.models import ShowDay, Designer, DesignerAssignment, Applicant, Photo
 from app.schemas import DesignerIn, DesignerAssignmentIn, DeckPreferenceIn
 
 router = APIRouter(tags=["designers"])
@@ -39,6 +39,7 @@ async def list_designers(show_day_id: int, db: AsyncSession = Depends(get_db)):
             "name": d.name,
             "order_in_day": d.order_in_day,
             "notes": d.notes,
+            "roster_only": d.roster_only,
             "models": [
                 {
                     "applicant_id": a.applicant.id,
@@ -95,6 +96,18 @@ async def move_designer(designer_id: int, payload: dict, db: AsyncSession = Depe
     await db.commit()
     await db.refresh(designer)
     return {"id": designer.id, "show_day_id": designer.show_day_id, "order_in_day": designer.order_in_day}
+
+
+@router.put("/designers/{designer_id}/roster-only")
+async def set_designer_roster_only(designer_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Toggles a designer between pick-mode (Preferred 1/2 buttons on their deck link)
+    and roster-only mode (their link just lists the lineup, no picks)."""
+    designer = await db.get(Designer, designer_id)
+    if not designer:
+        raise HTTPException(status_code=404, detail="Designer not found")
+    designer.roster_only = bool(payload.get("roster_only"))
+    await db.commit()
+    return {"id": designer.id, "roster_only": designer.roster_only}
 
 
 @router.delete("/designers/{designer_id}")
@@ -237,6 +250,7 @@ async def get_deck(token: str, db: AsyncSession = Depends(get_db)):
     return {
         "designer_name": designer.name,
         "show_day": designer.show_day.name if designer.show_day else None,
+        "roster_only": designer.roster_only,
         "models": models,
     }
 
@@ -258,12 +272,12 @@ async def set_deck_preference(token: str, applicant_id: int, payload: DeckPrefer
     assignment = result.scalar_one_or_none()
     if not assignment:
         raise HTTPException(status_code=404, detail="This model isn't on your deck")
+    if designer.roster_only:
+        raise HTTPException(status_code=400, detail="This deck is roster-only — no picks needed")
 
     assignment.preference = payload.preference
     await db.commit()
     return {"status": "saved"}
-
-
 @router.get("/final-roster")
 async def final_roster(show_day_id: int, db: AsyncSession = Depends(get_db)):
     """
