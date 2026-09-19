@@ -110,6 +110,18 @@ async def set_designer_roster_only(designer_id: int, payload: dict, db: AsyncSes
     return {"id": designer.id, "roster_only": designer.roster_only}
 
 
+@router.put("/designers/{designer_id}/notes")
+async def set_designer_notes(designer_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Updates a designer's internal notes (casting-director-only — never shown on their deck link)."""
+    designer = await db.get(Designer, designer_id)
+    if not designer:
+        raise HTTPException(status_code=404, detail="Designer not found")
+    notes = payload.get("notes")
+    designer.notes = notes.strip() if notes and notes.strip() else None
+    await db.commit()
+    return {"id": designer.id, "notes": designer.notes}
+
+
 @router.delete("/designers/{designer_id}")
 async def remove_designer(designer_id: int, db: AsyncSession = Depends(get_db)):
     designer = await db.get(Designer, designer_id)
