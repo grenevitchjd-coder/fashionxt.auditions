@@ -131,6 +131,33 @@ MIGRATIONS: list[tuple[str, str]] = [
         )
         """,
     ),
+        (
+        "013_look_status",
+        """
+        CREATE TABLE IF NOT EXISTS look_status (
+            id SERIAL PRIMARY KEY,
+            applicant_id INTEGER NOT NULL REFERENCES applicant(id) ON DELETE CASCADE,
+            designer_id INTEGER NOT NULL REFERENCES designer(id) ON DELETE CASCADE,
+            hair_done BOOLEAN NOT NULL DEFAULT false,
+            makeup_done BOOLEAN NOT NULL DEFAULT false,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (applicant_id, designer_id)
+        )
+        """,
+    ),
+    (
+        "014_team_order",
+        """
+        CREATE TABLE IF NOT EXISTS team_order (
+            id SERIAL PRIMARY KEY,
+            team TEXT NOT NULL,
+            designer_id INTEGER NOT NULL REFERENCES designer(id) ON DELETE CASCADE,
+            applicant_id INTEGER NOT NULL REFERENCES applicant(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL,
+            UNIQUE (team, designer_id, applicant_id)
+        )
+        """,
+    ),
     # ---- New migrations go BELOW this line. ----
 ]
 

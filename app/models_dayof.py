@@ -48,3 +48,30 @@ class DesignerCheckin(Base):
 
     designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"), primary_key=True)
     checked_in_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LookStatus(Base):
+    """Whether the Hair / Make Up team has finished one model's look for one designer."""
+    __tablename__ = "look_status"
+    __table_args__ = (UniqueConstraint("applicant_id", "designer_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
+    designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
+    hair_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    makeup_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TeamOrder(Base):
+    """A team's own model order inside one designer (the designer's real lineup is never touched)."""
+    __tablename__ = "team_order"
+    __table_args__ = (UniqueConstraint("team", "designer_id", "applicant_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    team: Mapped[str] = mapped_column(Text, nullable=False)
+    designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
+    applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
+    position: Mapped[int] = mapped_column(nullable=False)
