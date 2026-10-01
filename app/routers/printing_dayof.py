@@ -119,11 +119,12 @@ def build_check_in_sheet(roster: dict, only_missing: bool) -> bytes:
 
     model_rows = [
         (bool(m["checked_in_at"]), m["full_name"],
-         "Walking for: " + " &nbsp;&middot;&nbsp; ".join(f"{d['order_in_day']}. {escape(d['name'])}" for d in m["designers"]))
+         "Walking for: " + " &nbsp;&middot;&nbsp; ".join(f"{d['order_in_day']}. {escape(d['name'])} ({escape(d.get('walkthrough') or 'TBD')})" for d in m["designers"]))
         for m in models if keep(m)
     ]
     designer_rows = [
-        (bool(d["checked_in_at"]), d["name"], f"Designer #{d['order_in_day']} &middot; {d['model_count']} model{'' if d['model_count'] == 1 else 's'}")
+        (bool(d["checked_in_at"]), d["name"], f"Designer #{d['order_in_day']} &middot; {d['model_count']} model{'' if d['model_count'] == 1 else 's'}"
+         f" &middot; Walk-through {escape(d.get('walkthrough') or 'TBD')}")
         for d in designers if keep(d)
     ]
     staff_rows = [(bool(s["checked_in_at"]), s["name"], escape(s["attendee_type"])) for s in staff if keep(s)]
@@ -248,6 +249,7 @@ def _draw_card(c, x, y, model: dict, day: dict):
     c.setFont("Helvetica-Bold", 7)
     c.setFillColor(MUTED)
     c.drawString(x + pad, ty, "WALKING FOR  (number = order in the show)")
+    c.drawRightString(x + CARD_W - pad, ty, "WALK-THROUGH")
     ty -= 8
 
     designers = model["designers"]
@@ -268,9 +270,16 @@ def _draw_card(c, x, y, model: dict, day: dict):
         c.drawCentredString(x + pad + badge_r, cy - nsize * 0.35, num)
         c.setFillColor(INK)
         dname = d["name"]
-        dsize = _fit_font(dname, "Helvetica-Bold", text_size, 7, inner_w - 2 * badge_r - 8)
+        walk = d.get("walkthrough")
+        wtext = walk or "TBD"
+        wsize = min(9.5, max(text_size, 7))
+        wwidth = stringWidth(wtext, "Helvetica-Bold", wsize)
+        dsize = _fit_font(dname, "Helvetica-Bold", text_size, 7, inner_w - 2 * badge_r - 8 - wwidth - 10)
         c.setFont("Helvetica-Bold", dsize)
         c.drawString(x + pad + 2 * badge_r + 8, cy - dsize * 0.35, dname)
+        c.setFont("Helvetica-Bold", wsize)
+        c.setFillColor(BRASS_DARK if walk else MUTED)
+        c.drawRightString(x + CARD_W - pad, cy - wsize * 0.35, wtext)
         ty -= step
 
 

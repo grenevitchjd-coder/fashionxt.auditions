@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import Applicant, Designer, DesignerAssignment, ShowDay
 from app.models_dayof import DayModelStatus, DesignerCheckin, NonModelAttendee
+from app.timefmt import walk_label
 
 router = APIRouter(prefix="/day-of", tags=["day-of"])
 
@@ -142,7 +143,8 @@ async def load_day_roster(db: AsyncSession, show_day_id: int) -> dict:
     for d in designer_rows:
         for a in d.assignments:
             designers_by_model.setdefault(a.applicant_id, []).append(
-                {"designer_id": d.id, "name": d.name, "order_in_day": d.order_in_day}
+                {"designer_id": d.id, "name": d.name, "order_in_day": d.order_in_day,
+                 "walkthrough": walk_label(d.walkthrough_time)}
             )
 
     models = []
@@ -197,6 +199,7 @@ async def load_day_roster(db: AsyncSession, show_day_id: int) -> dict:
                 "name": d.name,
                 "order_in_day": d.order_in_day,
                 "model_count": len(d.assignments),
+                "walkthrough": walk_label(d.walkthrough_time),
                 "checked_in_at": _iso(designer_checkins.get(d.id)),
             }
             for d in designer_rows

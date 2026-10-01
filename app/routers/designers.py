@@ -1,3 +1,6 @@
+import re
+from datetime import time as dtime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -8,6 +11,7 @@ import secrets
 from app.database import get_db
 from app.models import ShowDay, Designer, DesignerAssignment, Applicant, Photo
 from app.schemas import DesignerIn, DesignerAssignmentIn, DeckPreferenceIn
+from app.timefmt import walk_label
 
 router = APIRouter(tags=["designers"])
 
@@ -40,6 +44,8 @@ async def list_designers(show_day_id: int, db: AsyncSession = Depends(get_db)):
             "order_in_day": d.order_in_day,
             "notes": d.notes,
             "roster_only": d.roster_only,
+            "walkthrough_time": d.walkthrough_time.strftime("%H:%M") if d.walkthrough_time else None,
+            "walkthrough": walk_label(d.walkthrough_time),
             "models": [
                 {
                     "applicant_id": a.applicant.id,
@@ -120,6 +126,29 @@ async def set_designer_notes(designer_id: int, payload: dict, db: AsyncSession =
     designer.notes = notes.strip() if notes and notes.strip() else None
     await db.commit()
     return {"id": designer.id, "notes": designer.notes}
+
+
+@router.put("/designers/{designer_id}/walkthrough-time")
+async def set_designer_walkthrough_time(designer_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Sets (or clears) the designer's practice-walk start time. Body: {"time": "14:30"} or {"time": null}.
+    Information only — it never changes the show order."""
+    designer = await db.get(Designer, designer_id)
+    if not designer:
+        raise HTTPException(status_code=404, detail="Designer not found")
+    raw = payload.get("time")
+    if raw is None or str(raw).strip() == "":
+        designer.walkthrough_time = None
+    else:
+        m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", str(raw).strip())
+        if not m:
+            raise HTTPException(status_code=400, detail="Time must look like 14:30")
+        designer.walkthrough_time = dtime(int(m.group(1)), int(m.group(2)))
+    await db.commit()
+    return {
+        "id": designer.id,
+        "walkthrough_time": designer.walkthrough_time.strftime("%H:%M") if designer.walkthrough_time else None,
+        "walkthrough": walk_label(designer.walkthrough_time),
+    }
 
 
 @router.delete("/designers/{designer_id}")
@@ -290,6 +319,8 @@ async def set_deck_preference(token: str, applicant_id: int, payload: DeckPrefer
     assignment.preference = payload.preference
     await db.commit()
     return {"status": "saved"}
+
+
 @router.get("/final-roster")
 async def final_roster(show_day_id: int, db: AsyncSession = Depends(get_db)):
     """

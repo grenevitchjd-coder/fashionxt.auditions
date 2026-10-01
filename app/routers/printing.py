@@ -27,6 +27,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import Designer, DesignerAssignment, ShowDay
+from app.timefmt import walk_label
 
 router = APIRouter(tags=["printing"])
 
@@ -215,6 +216,17 @@ def _b2b_text(flag: dict) -> str:
     return "!! BACK TO BACK &mdash; " + " &nbsp;|&nbsp; ".join(parts)
 
 
+def walk_para(label: str | None) -> Paragraph:
+    """'WALK-THROUGH 9:30 AM' line for a designer header ('TBD' when no time is set)."""
+    shown = escape(label) if label else "TBD"
+    colour = "#7d5c2c" if label else "#8a8f94"
+    return Paragraph(
+        f"<font name='Helvetica-Bold' size='8' color='#5f6368'>WALK-THROUGH&nbsp;&nbsp;</font>"
+        f"<font name='Helvetica-Bold' size='11' color='{colour}'>{shown}</font>",
+        ParagraphStyle("walk", fontName="Helvetica", fontSize=11, leading=14),
+    )
+
+
 def _designer_block(designer: Designer, show_notes: bool, b2b: dict | None = None):
     """One designer card. A single table, so a long lineup can flow onto the next
     page, with the designer header repeating at the top of that page."""
@@ -227,7 +239,7 @@ def _designer_block(designer: Designer, show_notes: bool, b2b: dict | None = Non
     head = Table(
         [[
             NumberBadge(designer.order_in_day),
-            Paragraph(escape(designer.name), DESIGNER_NAME),
+            [Paragraph(escape(designer.name), DESIGNER_NAME), walk_para(walk_label(designer.walkthrough_time))],
             Paragraph(count_html, ParagraphStyle("cnt", fontName="Helvetica", fontSize=20, leading=24, alignment=2)),
         ]],
         colWidths=[0.70 * inch, W - 0.70 * inch - 1.5 * inch, 1.5 * inch],

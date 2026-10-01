@@ -106,7 +106,7 @@ MIGRATIONS: list[tuple[str, str]] = [
         "010_non_model_attendee_day_index",
         "CREATE INDEX IF NOT EXISTS ix_non_model_attendee_show_day ON non_model_attendee (show_day_id)",
     ),
-        (
+    (
         "011_day_model_status",
         """
         CREATE TABLE IF NOT EXISTS day_model_status (
@@ -131,7 +131,7 @@ MIGRATIONS: list[tuple[str, str]] = [
         )
         """,
     ),
-        (
+    (
         "013_look_status",
         """
         CREATE TABLE IF NOT EXISTS look_status (
@@ -158,13 +158,17 @@ MIGRATIONS: list[tuple[str, str]] = [
         )
         """,
     ),
-        (
+    (
         "015_look_hair_in_progress",
         "ALTER TABLE look_status ADD COLUMN IF NOT EXISTS hair_in_progress BOOLEAN NOT NULL DEFAULT false",
     ),
     (
         "016_look_makeup_in_progress",
         "ALTER TABLE look_status ADD COLUMN IF NOT EXISTS makeup_in_progress BOOLEAN NOT NULL DEFAULT false",
+    ),
+    (
+        "017_designer_walkthrough_time",
+        "ALTER TABLE designer ADD COLUMN IF NOT EXISTS walkthrough_time TIME",
     ),
     # ---- New migrations go BELOW this line. ----
 ]

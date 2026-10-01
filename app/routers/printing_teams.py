@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.routers.printing import (
     BRASS, BRASS_DARK, CARD_BORDER, EMPTY, HEAD_BG, INK, MARGIN, MUTED, NOTE_BG, PAGE_W, ROW_LINE, ZEBRA,
-    DESIGNER_NAME, NumberBadge, NumberedCanvas, PageHeader, _printed_stamp,
+    DESIGNER_NAME, NumberBadge, NumberedCanvas, PageHeader, _printed_stamp, walk_para,
 )
 from app.routers.printing_dayof import CheckBox, _date_title, _pdf_response
 from app.routers.teams import load_team_board
@@ -132,7 +132,7 @@ def _designer_card(d: dict, thumbs: dict, ) -> list:
         f"<font name='Helvetica-Bold' size='9' color='#5f6368'>&nbsp;MODEL{'' if n == 1 else 'S'}</font>"
     )
     head = Table(
-        [[NumberBadge(d["order_in_day"]), Paragraph(escape(d["name"]), DESIGNER_NAME), Paragraph(count_html, COUNT_STYLE)]],
+        [[NumberBadge(d["order_in_day"]), [Paragraph(escape(d["name"]), DESIGNER_NAME), walk_para(d.get("walkthrough"))], Paragraph(count_html, COUNT_STYLE)]],
         colWidths=[0.70 * inch, W - 0.70 * inch - 1.5 * inch, 1.5 * inch],
     )
     head.setStyle(TableStyle([
@@ -153,7 +153,7 @@ def _designer_card(d: dict, thumbs: dict, ) -> list:
     for pos, m in enumerate(d["models"], start=1):
         info = [Paragraph(escape(m["full_name"]), NAME_STYLE)]
         if m["other_designers"]:
-            also = " &nbsp;&middot;&nbsp; ".join(f"{x['order_in_day']}. {escape(x['name'])}" for x in m["other_designers"])
+            also = " &nbsp;&middot;&nbsp; ".join(f"{x['order_in_day']}. {escape(x['name'])} ({escape(x.get('walkthrough') or 'TBD')})" for x in m["other_designers"])
             info.append(Paragraph(f"ALSO WALKING FOR: {also}", ALSO_STYLE))
         if m["note"]:
             info.append(Paragraph(f"Note: {escape(m['note'])}", NOTE_STYLE))

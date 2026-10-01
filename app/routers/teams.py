@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models import Applicant, Designer, ShowDay
 from app.models_dayof import DayModelStatus, LookStatus, TeamOrder
 from app.routers.dayof import _iso, _pick_photo
+from app.timefmt import walk_label
 
 router = APIRouter(prefix="/day-of/teams", tags=["day-of-teams"])
 
@@ -85,7 +86,8 @@ async def load_team_board(db: AsyncSession, team: str, show_day_id: int) -> dict
     for d in designers:
         for a in d.assignments:
             designers_by_model.setdefault(a.applicant_id, []).append(
-                {"designer_id": d.id, "name": d.name, "order_in_day": d.order_in_day}
+                {"designer_id": d.id, "name": d.name, "order_in_day": d.order_in_day,
+                 "walkthrough": walk_label(d.walkthrough_time)}
             )
 
     out_designers = []
@@ -118,6 +120,7 @@ async def load_team_board(db: AsyncSession, team: str, show_day_id: int) -> dict
             "id": d.id,
             "name": d.name,
             "order_in_day": d.order_in_day,
+            "walkthrough": walk_label(d.walkthrough_time),
             "custom_order": any((d.id, a.applicant_id) in orders for a in assignments),
             "models": models,
         })
