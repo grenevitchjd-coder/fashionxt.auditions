@@ -22,6 +22,7 @@ from app.routers.dayof import _iso, _pick_photo
 router = APIRouter(prefix="/day-of/teams", tags=["day-of-teams"])
 
 TEAMS = {"hair": "hair_done", "makeup": "makeup_done"}
+PROGRESS = {"hair": "hair_in_progress", "makeup": "makeup_in_progress"}
 TEAM_LABELS = {"hair": "Hair Team", "makeup": "Make Up Team"}
 
 
@@ -34,6 +35,7 @@ def _check_team(team: str) -> str:
 async def load_team_board(db: AsyncSession, team: str, show_day_id: int) -> dict:
     """Everything one team page (and its PDF) needs for one show day."""
     done_col = _check_team(team)
+    prog_col = PROGRESS[team]
     day = await db.get(ShowDay, show_day_id)
     if not day:
         raise HTTPException(status_code=404, detail="Show day not found")
@@ -69,7 +71,10 @@ async def load_team_board(db: AsyncSession, team: str, show_day_id: int) -> dict
         )
         statuses = {s.applicant_id: s for s in res.scalars().all()}
         res = await db.execute(select(LookStatus).where(LookStatus.designer_id.in_(designer_ids)))
-        looks = {(l.applicant_id, l.designer_id): getattr(l, done_col) for l in res.scalars().all()}
+        looks = {
+            (l.applicant_id, l.designer_id): (bool(getattr(l, done_col)), bool(getattr(l, prog_col)))
+            for l in res.scalars().all()
+        }
         res = await db.execute(
             select(TeamOrder).where(TeamOrder.team == team, TeamOrder.designer_id.in_(designer_ids))
         )
@@ -96,15 +101,17 @@ async def load_team_board(db: AsyncSession, team: str, show_day_id: int) -> dict
                 continue
             st = statuses.get(ap.id)
             mine = designers_by_model[ap.id]
+            done, in_progress = looks.get((ap.id, d.id), (False, False))
             models.append({
                 "applicant_id": ap.id,
                 "full_name": ap.full_name,
                 "photo_url": _pick_photo(ap.photos),
                 "checked_in_at": _iso(st.checked_in_at) if st else None,
                 "note": st.note if st else None,
-                "done": bool(looks.get((ap.id, d.id), False)),
+                "done": done,
+                "status": "done" if done else ("in_progress" if in_progress else "todo"),
                 "looks_total": len(mine),
-                "all_done": all(looks.get((ap.id, x["designer_id"]), False) for x in mine),
+                "all_done": all(looks.get((ap.id, x["designer_id"]), (False, False))[0] for x in mine),
                 "other_designers": [x for x in mine if x["designer_id"] != d.id],
             })
         out_designers.append({
@@ -137,6 +144,12 @@ class LookDoneIn(BaseModel):
     done: bool
 
 
+class LookStatusIn(BaseModel):
+    applicant_id: int
+    designer_id: int
+    status: str  # "todo" | "in_progress" | "done"
+
+
 class AllDoneIn(BaseModel):
     applicant_id: int
     show_day_id: int
@@ -154,7 +167,7 @@ async def _is_checked_in(db: AsyncSession, applicant_id: int, show_day_id: int) 
     return bool(st and st.checked_in_at)
 
 
-async def _set_look(db: AsyncSession, col: str, applicant_id: int, designer_id: int, done: bool) -> None:
+async def _set_look(db: AsyncSession, team: str, applicant_id: int, designer_id: int, status: str) -> None:
     async def _find():
         return (
             await db.execute(
@@ -171,18 +184,35 @@ async def _set_look(db: AsyncSession, col: str, applicant_id: int, designer_id: 
         except IntegrityError:
             await db.rollback()
             row = await _find()
-    setattr(row, col, done)
+    setattr(row, TEAMS[team], status == "done")
+    setattr(row, PROGRESS[team], status == "in_progress")
+
+
+@router.post("/{team}/look-status")
+async def set_look_status(team: str, payload: LookStatusIn, db: AsyncSession = Depends(get_db)):
+    """Sets one model's look for one designer to todo / in_progress / done."""
+    _check_team(team)
+    if payload.status not in ("todo", "in_progress", "done"):
+        raise HTTPException(status_code=400, detail="Status must be todo, in_progress or done")
+    designer = await db.get(Designer, payload.designer_id)
+    if designer is None:
+        raise HTTPException(status_code=404, detail="Designer not found")
+    if payload.status != "todo" and not await _is_checked_in(db, payload.applicant_id, designer.show_day_id):
+        raise HTTPException(status_code=409, detail="This model isn't checked in yet")
+    await _set_look(db, team, payload.applicant_id, payload.designer_id, payload.status)
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.post("/{team}/look-done")
 async def set_look_done(team: str, payload: LookDoneIn, db: AsyncSession = Depends(get_db)):
-    col = _check_team(team)
+    _check_team(team)
     designer = await db.get(Designer, payload.designer_id)
     if designer is None:
         raise HTTPException(status_code=404, detail="Designer not found")
     if payload.done and not await _is_checked_in(db, payload.applicant_id, designer.show_day_id):
         raise HTTPException(status_code=409, detail="This model isn't checked in yet")
-    await _set_look(db, col, payload.applicant_id, payload.designer_id, payload.done)
+    await _set_look(db, team, payload.applicant_id, payload.designer_id, "done" if payload.done else "todo")
     await db.commit()
     return {"status": "ok"}
 
@@ -190,7 +220,7 @@ async def set_look_done(team: str, payload: LookDoneIn, db: AsyncSession = Depen
 @router.post("/{team}/all-done")
 async def set_all_done(team: str, payload: AllDoneIn, db: AsyncSession = Depends(get_db)):
     """Marks (or clears) this model's look for EVERY designer they walk for that day."""
-    col = _check_team(team)
+    _check_team(team)
     if payload.done and not await _is_checked_in(db, payload.applicant_id, payload.show_day_id):
         raise HTTPException(status_code=409, detail="This model isn't checked in yet")
     designers = (
@@ -204,7 +234,7 @@ async def set_all_done(team: str, payload: AllDoneIn, db: AsyncSession = Depends
     if not ids:
         raise HTTPException(status_code=404, detail="Model has no designers that day")
     for did in ids:
-        await _set_look(db, col, payload.applicant_id, did, payload.done)
+        await _set_look(db, team, payload.applicant_id, did, "done" if payload.done else "todo")
     await db.commit()
     return {"status": "ok"}
 

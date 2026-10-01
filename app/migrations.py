@@ -158,6 +158,14 @@ MIGRATIONS: list[tuple[str, str]] = [
         )
         """,
     ),
+        (
+        "015_look_hair_in_progress",
+        "ALTER TABLE look_status ADD COLUMN IF NOT EXISTS hair_in_progress BOOLEAN NOT NULL DEFAULT false",
+    ),
+    (
+        "016_look_makeup_in_progress",
+        "ALTER TABLE look_status ADD COLUMN IF NOT EXISTS makeup_in_progress BOOLEAN NOT NULL DEFAULT false",
+    ),
     # ---- New migrations go BELOW this line. ----
 ]
 
