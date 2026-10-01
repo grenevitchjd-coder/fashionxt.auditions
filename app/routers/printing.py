@@ -185,7 +185,37 @@ def _category_label(category) -> str:
     return "-".join(part.capitalize() for part in value.split("_"))
 
 
-def _designer_block(designer: Designer, show_notes: bool):
+B2B_BG = colors.HexColor("#fff0d1")
+B2B_BAR = colors.HexColor("#d98a00")
+B2B_TEXT = ParagraphStyle("b2b", fontName="Helvetica-Bold", fontSize=9, leading=11.5, textColor=colors.HexColor("#9a5b00"))
+
+
+def back_to_back_map(designers: list[Designer]) -> dict[tuple[int, int], dict]:
+    """
+    Models who walk for two designers that run one right after the other in the show
+    (designer 2 then 3, 4 then 5, ...). Returns {(designer_id, applicant_id): {"prev": designer|None,
+    "next": designer|None}} only for the flagged rows; each flagged model shows up under BOTH designers.
+    """
+    ordered = sorted(designers, key=lambda d: (d.order_in_day, d.id))
+    members = [{a.applicant_id for a in d.assignments} for d in ordered]
+    flags: dict[tuple[int, int], dict] = {}
+    for i in range(len(ordered) - 1):
+        for applicant_id in members[i] & members[i + 1]:
+            flags.setdefault((ordered[i].id, applicant_id), {"prev": None, "next": None})["next"] = ordered[i + 1]
+            flags.setdefault((ordered[i + 1].id, applicant_id), {"prev": None, "next": None})["prev"] = ordered[i]
+    return flags
+
+
+def _b2b_text(flag: dict) -> str:
+    parts = []
+    if flag["prev"] is not None:
+        parts.append(f"just came from {flag['prev'].order_in_day}. {escape(flag['prev'].name)}")
+    if flag["next"] is not None:
+        parts.append(f"goes straight to {flag['next'].order_in_day}. {escape(flag['next'].name)}")
+    return "!! BACK TO BACK &mdash; " + " &nbsp;|&nbsp; ".join(parts)
+
+
+def _designer_block(designer: Designer, show_notes: bool, b2b: dict | None = None):
     """One designer card. A single table, so a long lineup can flow onto the next
     page, with the designer header repeating at the top of that page."""
     W = PAGE_W
@@ -243,19 +273,24 @@ def _designer_block(designer: Designer, show_notes: bool):
         span_rows.append(len(rows) - 1)
 
     first_model_row = len(rows)
+    flagged_rows: list[int] = []
     if not designer.assignments:
         rows.append([Paragraph("No models assigned yet.", EMPTY), ""])
         span_rows.append(len(rows) - 1)
     else:
         for idx, a in enumerate(designer.assignments, start=1):
-            rows.append([
-                Paragraph(str(idx), MODEL_NUM),
-                Paragraph(
-                    f"{escape(a.applicant.full_name)}"
-                    f"<font name='Helvetica' size='10.5' color='#5f6368'>&nbsp;&nbsp;({_category_label(a.applicant.category)})</font>",
-                    MODEL_NAME,
-                ),
-            ])
+            name_para = Paragraph(
+                f"{escape(a.applicant.full_name)}"
+                f"<font name='Helvetica' size='10.5' color='#5f6368'>&nbsp;&nbsp;({_category_label(a.applicant.category)})</font>",
+                MODEL_NAME,
+            )
+            flag = (b2b or {}).get((designer.id, a.applicant_id))
+            if flag:
+                flagged_rows.append(len(rows))
+                cell = [name_para, Paragraph(_b2b_text(flag), B2B_TEXT)]
+            else:
+                cell = name_para
+            rows.append([Paragraph(str(idx), MODEL_NUM), cell])
 
     style = [
         ("BOX", (0, 0), (-1, -1), 0.9, CARD_BORDER),
@@ -286,6 +321,9 @@ def _designer_block(designer: Designer, show_notes: bool):
             style.append(("LINEBELOW", (0, r), (-1, r), 0.5, ROW_LINE))
         for r in range(first_model_row + 1, last + 1, 2):
             style.append(("BACKGROUND", (0, r), (-1, r), ZEBRA))
+        for r in flagged_rows:  # back-to-back models: amber row with a bar on the left (drawn last so it wins)
+            style.append(("BACKGROUND", (0, r), (-1, r), B2B_BG))
+            style.append(("LINEBEFORE", (0, r), (0, r), 4, B2B_BAR))
 
     card = Table(rows, colWidths=col_widths, repeatRows=1)
     card.setStyle(TableStyle(style))
@@ -323,8 +361,9 @@ def build_designer_day_pdf(day: ShowDay, designers: list[Designer], show_notes: 
 
     if not designers:
         story.append(Paragraph("No designers have been added to this day yet.", EMPTY))
+    b2b = back_to_back_map(designers)
     for d in designers:
-        story.extend(_designer_block(d, show_notes))
+        story.extend(_designer_block(d, show_notes, b2b))
 
     doc.build(story, canvasmaker=_Canvas)
     return buffer.getvalue()
