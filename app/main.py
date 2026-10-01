@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine
 from app.migrations import run_migrations
-from app.routers import ingest, applicants, events, designers, printing, printing_dayof, printing_teams, headshots, dayof, teams
+from app.routers import ingest, applicants, events, designers, printing, printing_dayof, printing_teams, headshots, dayof, teams, tracking
 
 
 @asynccontextmanager
@@ -34,6 +34,7 @@ app.include_router(printing_dayof.router)
 app.include_router(teams.router)
 app.include_router(printing_teams.router)
 app.include_router(headshots.router)
+app.include_router(tracking.router)
 
 
 @app.get("/health")

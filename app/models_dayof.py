@@ -1,4 +1,4 @@
-"""Day-of-show tables (check-in, non-model attendees, hair/make-up status).
+"""Day-of-show tables (check-in, non-model attendees, hair/make-up status, rehearsal attendance).
 Kept in its own module so models.py stays untouched. The tables themselves are
 created by app/migrations.py."""
 from datetime import datetime
@@ -77,3 +77,14 @@ class TeamOrder(Base):
     designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
     applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
     position: Mapped[int] = mapped_column(nullable=False)
+
+
+class RehearsalAttendance(Base):
+    """A row exists only while the model is ticked as present at one designer's walk-through."""
+    __tablename__ = "rehearsal_attendance"
+    __table_args__ = (UniqueConstraint("applicant_id", "designer_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    applicant_id: Mapped[int] = mapped_column(ForeignKey("applicant.id", ondelete="CASCADE"))
+    designer_id: Mapped[int] = mapped_column(ForeignKey("designer.id", ondelete="CASCADE"))
+    attended_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

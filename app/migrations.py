@@ -170,6 +170,18 @@ MIGRATIONS: list[tuple[str, str]] = [
         "017_designer_walkthrough_time",
         "ALTER TABLE designer ADD COLUMN IF NOT EXISTS walkthrough_time TIME",
     ),
+    (
+        "018_rehearsal_attendance",
+        """
+        CREATE TABLE IF NOT EXISTS rehearsal_attendance (
+            id SERIAL PRIMARY KEY,
+            applicant_id INTEGER NOT NULL REFERENCES applicant(id) ON DELETE CASCADE,
+            designer_id INTEGER NOT NULL REFERENCES designer(id) ON DELETE CASCADE,
+            attended_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (applicant_id, designer_id)
+        )
+        """,
+    ),
     # ---- New migrations go BELOW this line. ----
 ]
 
