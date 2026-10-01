@@ -1,9 +1,21 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.database import engine
+from app.migrations import run_migrations
 from app.routers import ingest, applicants, events, designers
 
-app = FastAPI(title="FashioNXT Casting API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Apply any pending database migrations before serving traffic.
+    await run_migrations(engine)
+    yield
+
+
+app = FastAPI(title="FashioNXT Casting API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
