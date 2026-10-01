@@ -87,6 +87,25 @@ MIGRATIONS: list[tuple[str, str]] = [
         WHERE NOT EXISTS (SELECT 1 FROM show_day)
         """,
     ),
+    # ---- Day of Show ----
+    (
+        "009_non_model_attendee",
+        """
+        CREATE TABLE IF NOT EXISTS non_model_attendee (
+            id SERIAL PRIMARY KEY,
+            show_day_id INTEGER NOT NULL REFERENCES show_day(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            attendee_type TEXT NOT NULL,
+            group_key TEXT,
+            checked_in_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+    ),
+    (
+        "010_non_model_attendee_day_index",
+        "CREATE INDEX IF NOT EXISTS ix_non_model_attendee_show_day ON non_model_attendee (show_day_id)",
+    ),
     # ---- New migrations go BELOW this line. ----
 ]
 
