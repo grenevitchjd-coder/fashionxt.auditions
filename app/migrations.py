@@ -106,6 +106,31 @@ MIGRATIONS: list[tuple[str, str]] = [
         "010_non_model_attendee_day_index",
         "CREATE INDEX IF NOT EXISTS ix_non_model_attendee_show_day ON non_model_attendee (show_day_id)",
     ),
+        (
+        "011_day_model_status",
+        """
+        CREATE TABLE IF NOT EXISTS day_model_status (
+            id SERIAL PRIMARY KEY,
+            applicant_id INTEGER NOT NULL REFERENCES applicant(id) ON DELETE CASCADE,
+            show_day_id INTEGER NOT NULL REFERENCES show_day(id) ON DELETE CASCADE,
+            checked_in_at TIMESTAMPTZ,
+            note TEXT,
+            hair_done BOOLEAN NOT NULL DEFAULT false,
+            makeup_done BOOLEAN NOT NULL DEFAULT false,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (applicant_id, show_day_id)
+        )
+        """,
+    ),
+    (
+        "012_designer_checkin",
+        """
+        CREATE TABLE IF NOT EXISTS designer_checkin (
+            designer_id INTEGER PRIMARY KEY REFERENCES designer(id) ON DELETE CASCADE,
+            checked_in_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+    ),
     # ---- New migrations go BELOW this line. ----
 ]
 
